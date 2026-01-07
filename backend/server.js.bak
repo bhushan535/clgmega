@@ -1,0 +1,202 @@
+// backend/server.js
+require('dotenv').config();
+
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const mongoose = require('mongoose');
+const Redis = require('redis');
+const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
+
+// utils / socket
+const { setIo } = require('./src/utils/socket');
+
+// controllers
+const authController = require('./src/controllers/auth.controller');
+const sessionController = require('./src/controllers/session.controller');
+const examController = require('./src/controllers/exam.controller');
+const internalController = require('./src/controllers/internal.controller');
+
+// models
+const FrameModel = require('./src/models/frame.model');
+const EventModel = require('./src/models/event.model');
+
+const { authMiddleware } = require('./src/utils/jwtAuth');
+
+const multer = require('multer');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// ensure frames static served
+const framesStaticPath = path.join(__dirname, 'frames');
+if (!fs.existsSync(framesStaticPath)) fs.mkdirSync(framesStaticPath, { recursive: true });
+app.use('/frames', express.static(framesStaticPath));
+
+// ensure uploads directory and serve it
+const uploadsPath = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
+app.use('/uploads', express.static(uploadsPath));
+
+// frame dir
+const FRAME_DIR = process.env.FRAME_SAVE_DIR || path.join(__dirname, 'frames');
+if (!fs.existsSync(FRAME_DIR)) fs.mkdirSync(FRAME_DIR, { recursive: true });
+
+// multer temp upload dir
+const upload = multer({ dest: path.join(uploadsPath, 'tmp') });
+
+// ---------------- HTTP routes ----------------
+// health
+app.get('/', (req, res) => res.send('clgmega backend up'));
+
+// auth routes
+app.post('/auth/register', ...authController.registerValidators, authController.register);
+app.post('/auth/login', ...authController.loginValidators, authController.login);
+
+
+// session routes (protected)
+app.get('/sessions/:sessionId/questions', authMiddleware, sessionController.getSessionQuestions);
+app.post('/sessions/:sessionId/answer', authMiddleware, express.json(), sessionController.saveAnswer);
+app.post('/sessions/:sessionId/submit', authMiddleware, sessionController.submitSession);
+
+// exam routes (protected)
+app.post('/exams', authMiddleware, ...examController.createExamValidators, examController.createExam);
+app.post('/exams/:examId/questions', authMiddleware, upload.single('image'), examController.addQuestion);
+
+// public exams
+app.get('/exams', examController.listExams);
+app.get('/exams/:examId', examController.getExam);
+
+// start exam (student)
+app.post('/exams/:examId/start', authMiddleware, sessionController.startExam);
+
+// internal testing
+app.post('/internal/emit-test', internalController.emitTest);
+
+// recent events API (readonly)
+app.get('/api/events/recent', async (req, res) => {
+  try {
+    const events = await EventModel.find({}).sort({ timestampStart: -1 }).limit(20);
+    res.json(events);
+  } catch (err) {
+    console.error('Error fetching events:', err);
+    res.status(500).json({ error: 'Failed to fetch events' });
+  }
+});
+
+// ---------------- server + socket.io ----------------
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
+// make io available to other modules
+setIo(io);
+
+// Redis client (will connect during init)
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const redisClient = Redis.createClient({ url: redisUrl });
+redisClient.on('error', (err) => console.error('Redis Client Error:', err));
+
+// helper: save base64 image to disk
+function saveBase64ToFile(base64data, sessionId, studentId) {
+  const frameId = uuidv4();
+  const matches = base64data.match(/^data:image\/\w+;base64,(.*)$/);
+  const b64 = matches ? matches[1] : base64data;
+  const buffer = Buffer.from(b64, 'base64');
+  const fname = `${sessionId || 'sess'}_${studentId || 'stu'}_${Date.now()}_${frameId}.jpg`;
+  const filePath = path.join(FRAME_DIR, fname);
+  fs.writeFileSync(filePath, buffer);
+  return { frameId, filePath };
+}
+
+// socket handlers
+io.on('connection', (socket) => {
+  console.log('socket connected', socket.id);
+
+  socket.on('frame', async (payload) => {
+    try {
+      const { sessionId='unknown', studentId='unknown', timestamp, imageBase64, uploadToken } = payload || {};
+
+      if (!imageBase64) {
+        socket.emit('frame_ack', { status: 'error', error: 'imageBase64 missing' });
+        return;
+      }
+
+      // save to disk
+      let saved;
+      try {
+        saved = saveBase64ToFile(imageBase64, sessionId, studentId);
+      } catch (e) {
+        console.error('Failed to save frame to disk:', e);
+        socket.emit('frame_ack', { status: 'error', error: 'save_failed' });
+        return;
+      }
+
+      const { frameId, filePath } = saved;
+
+      // create Frame doc
+      let frameDoc;
+      try {
+        frameDoc = await FrameModel.create({
+          frameId,
+          sessionId,
+          studentId,
+          filePath,
+          status: 'saved',
+          timestamp: timestamp ? new Date(timestamp) : new Date()
+        });
+      } catch (e) {
+        console.error('Failed to create Frame doc:', e);
+        socket.emit('frame_ack', { status: 'error', error: 'db_failed' });
+        return;
+      }
+
+      // push job to Redis queue
+      try {
+        if (!redisClient.isOpen) {
+          await redisClient.connect();
+        }
+        await redisClient.lPush('frame_queue', JSON.stringify({ frameId }));
+      } catch (e) {
+        console.error('Failed to push job to Redis:', e);
+        try { await FrameModel.updateOne({ frameId }, { $set: { status: 'error' } }); } catch (ee) {}
+        socket.emit('frame_ack', { status: 'error', error: 'queue_failed' });
+        return;
+      }
+
+      socket.emit('frame_ack', { status: 'queued', frameId });
+    } catch (err) {
+      console.error('frame handling error', err);
+      socket.emit('frame_ack', { status: 'error', error: String(err) });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('socket disconnected', socket.id);
+  });
+});
+
+// ---------------- init (connect DBs & start server) ----------------
+async function init() {
+  try {
+    const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/clgmega_dev';
+    await mongoose.connect(mongoUri);
+    console.log('MongoDB connected');
+
+    if (!redisClient.isOpen) {
+      await redisClient.connect();
+    }
+    console.log('Redis connected');
+
+    const PORT = process.env.PORT || 4000;
+    server.listen(PORT, () => console.log(`Backend listening on ${PORT}`));
+  } catch (err) {
+    console.error('Init error:', err);
+    process.exit(1);
+  }
+}
+
+init();

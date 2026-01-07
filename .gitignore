@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# env files
+.env
+.env.*
+!.env.example
+
+# logs
+npm-debug.log*
+yarn-error.log*
+
+# build
+dist/
+build/
+
+# python
+.venv/
+__pycache__/
+
+# uploads / frames
+backend/uploads/
+backend/frames/
+
+# ide
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
