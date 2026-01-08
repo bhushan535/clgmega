@@ -7,7 +7,7 @@ import { handleViolationAction } from "./actions/AutoActionEngine";
 import { detectPersons } from "./person/PersonDetector";
 import HeadPoseDetector from "./head/HeadPoseDetector";
 import { evaluateHeadPose } from "./rules/headPoseRules";
-
+import { captureFrame } from "../utils/captureFrame";
 export default function ProctoringEngine({
   forceSubmitExam,
   showWarningPopup
@@ -15,10 +15,16 @@ export default function ProctoringEngine({
   const videoRef = useRef(null);
 
   // 🔥 FINAL EXIT POINT
-  function handleFinalViolation(event) {
+  async function handleFinalViolation(event) {
     console.warn("🚨 FINAL VIOLATION:", event);
 
-    handleViolationAction(event, {
+    let snapshot = null;
+
+  if (videoRef.current) {
+    snapshot = await captureFrame(videoRef.current);
+  }
+
+    handleViolationAction({event,snapshot}, {
       submitExam: forceSubmitExam,
       warnStudent: showWarningPopup
     });
