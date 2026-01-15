@@ -6,13 +6,13 @@ export default function NavBar() {
   const user = getUserFromToken();
   const nav = useNavigate();
 
-  function logout() {
-    localStorage.removeItem("clg_token");
-    nav("/login");
-  }
+  // function logout() {
+  //   localStorage.removeItem("clg_token");
+  //   nav("/login");
+  // }
 
   // no navbar if not logged in
-  if (!user) return null;
+  // if (!user) return null;
 
   return (
     <nav
@@ -27,7 +27,7 @@ export default function NavBar() {
     >
       <strong>CLGMEGA</strong>
       <Link to="/proctor-test">Proctor Test</Link>
-      {user.role === "teacher" && (
+      {/* {user.role === "teacher" && (
         <>
           <Link to="/teacher/dashboard">Dashboard</Link>
           <Link to="/teacher/create">Create Exam</Link>
@@ -37,8 +37,8 @@ export default function NavBar() {
           <Link to="/teacher/results">Results</Link>
           <Link to="/teacher/analytics">Analytics</Link>
         </>
-      )}
-
+      )} */}
+{/* 
       {user.role === "student" && (
         <>
           <Link to="/student/exam">Exam</Link>
@@ -48,7 +48,7 @@ export default function NavBar() {
       <div style={{ marginLeft: "auto" }}>
         <button onClick={logout}>Logout</button>
         
-      </div>
+      </div> */}
     </nav>
   );
 }

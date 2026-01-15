@@ -32,11 +32,11 @@ export default function App() {
         <Route path="/proctor-test" element={<ProctorTest />} />
 
         {/* PUBLIC */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        {/* <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} /> */}
 
         {/* STUDENT */}
-        <Route
+        {/* <Route
           path="/student/dashboard"
           element={
             <ProtectedRoute allowedRole="student">
@@ -52,10 +52,10 @@ export default function App() {
               <StudentExam />
             </ProtectedRoute>
           }
-        />
+        /> */}
 
         {/* TEACHER */}
-        <Route
+        {/* <Route
           path="/teacher/dashboard"
           element={
             <ProtectedRoute allowedRole="teacher">
@@ -137,10 +137,10 @@ export default function App() {
               <TeacherAnalytics />
             </ProtectedRoute>
           }
-        />
+        /> */}
 
         {/* ROOT */}
-        <Route
+        {/* <Route
           path="/"
           element={
             user ? (
@@ -153,10 +153,10 @@ export default function App() {
               <Navigate to="/login" replace />
             )
           }
-        />
+        /> */}
 
         {/* FALLBACK */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* <Route path="*" element={<Navigate to="/" replace />} /> */}
       </Routes>
     </div>
   );

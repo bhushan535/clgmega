@@ -12,18 +12,22 @@ export function evaluateHeadPose(direction) {
 
   const duration = (now - lookAwayStart) / 1000;
 
-  if (duration >= 30) {
-    return {
-      type: "looking_away",
-      severity: "high",
-      duration
-    };
+  // 👀 SIDE LOOK
+  if (direction === "left" || direction === "right") {
+    if (duration >= 10) {
+      return {
+        type: "looking_away",
+        severity: duration >= 30 ? "high" : "medium",
+        duration
+      };
+    }
   }
 
-  if (duration >= 10) {
+  // 📱 LOOK DOWN (PHONE)
+  if (direction === "down" && duration >= 5) {
     return {
-      type: "looking_away",
-      severity: "medium",
+      type: "possible_phone_usage",
+      severity: "high",
       duration
     };
   }
